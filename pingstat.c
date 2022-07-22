@@ -249,7 +249,7 @@ int main(int argc, char** argv){
                     // write packet lost
                     data[0] = time(NULL);
                     data[1] = (long)latency;
-                    data[1] |= (long)10 << 32;
+                    data[1] |= (long)1 << 32;
                     fwrite(data, sizeof(long int), 2, fpout);
                     llost = seq;
                     (void)!asprintf(&err_string, "%s\n", buf+2);
@@ -270,6 +270,10 @@ int main(int argc, char** argv){
                             }
                             if(last+1 != seq){
                                 (void)!asprintf(&err_string, "PACKET LOSS (%d)\n", seq-last-1);
+                                data[0] = time(NULL);
+                                data[1] = (long)latency;
+                                data[1] |= (long)10 << 32;
+                                fwrite(data, sizeof(long int), 2, fpout);
                                 print_error(WARN);
                                 llost = seq;
                             }
