@@ -10,13 +10,15 @@
 #include <time.h>
 #include <string.h>
 
+#include <stdarg.h>
+#include <limits.h>
+
 #define BUF_SIZE 256
 
 #define bool int
 #define false 0
 #define true 1
 
-char* err_string = NULL;
 char* prog_name;
 
 void sig_ignore(int signum){
@@ -51,23 +53,25 @@ enum err_type{
     ERROR, WARN, INFO
 };
 
-void print_error(enum err_type type){
+void print_error(enum err_type type, char *format, int quant, ...){
+    va_list vlst;
+    va_start(vlst, quant);
+
     time_t seconds;
     struct tm *timeStruct;
     seconds = time(NULL);
     timeStruct = localtime(&seconds);
 
     fprintf(stderr, "%02d:%02d:%02d ", timeStruct->tm_hour, timeStruct->tm_min, timeStruct->tm_sec);
-    if(!err_string){
-        fprintf(stderr, "\e[1;31mERR:\e[0m UNKNOWN ERROR.\n");
-    }else{
-        switch(type){
-            case(ERROR): fprintf(stderr, "\e[1;31mERROR: \e[0m"); break;
-            case(WARN): fprintf(stderr, "\e[1;35mWARN: \e[0m"); break;
-            case(INFO): fprintf(stderr, "\e[1;36mINFO: \e[0m");
-        }
-        fprintf(stderr, "%s", err_string);
+    switch(type){
+        case(ERROR): fprintf(stderr, "\e[1;31mERROR: \e[0m"); break;
+        case(WARN): fprintf(stderr, "\e[1;35mWARN: \e[0m"); break;
+        case(INFO): fprintf(stderr, "\e[1;36mINFO: \e[0m"); break;
+        default: fprintf(stderr, "\e[1;31mUNKNOWN: \e[0m");
     }
+    vfprintf(stderr, format, vlst);
+
+    va_end(vlst);
 }
 
 enum prog_name{PING, GNUPLOT};
@@ -95,9 +99,7 @@ void dependencies(){
     }
     for(int i=0; i<count; ++i){
         if(!prog_full_path[i]){
-            if(err_string) free(err_string);
-            (void)!asprintf(&err_string, "command '%s' was not found on the path.\n", names[i]);
-            print_error(ERROR);
+            print_error(ERROR, "command '%s' was not found on the path.\n", 1, names[i]);
         }
     }
     free(buf);
@@ -113,9 +115,7 @@ int main(int argc, char** argv){
     prog_name = argv[0];
     dependencies();
     if(!prog_full_path[PING]){
-        if(err_string) free(err_string);
-        (void)!asprintf(&err_string, "ping must be installed, as ICMP echo requests require root permissions.\n");
-        print_error(ERROR);
+        print_error(ERROR, "ping must be installed, as ICMP echo requests require root permissions.\n", 0);
         exit(5);
     }
 
@@ -220,20 +220,14 @@ int main(int argc, char** argv){
                 }else switch(*bufin){
                     case 'g':
                         if(args.outfile && !strcmp(args.outfile, "-")){
-                            if(err_string) free(err_string);
-                            (void)!asprintf(&err_string, "The graph command expects data to be written to a file. This will fail if '-g' was not used correctly\n");
-                            print_error(WARN);
+                            print_error(WARN, "The graph command expects data to be written to a file. This will fail if '-g' was not used correctly\n", 0);
                         }
                         fflush(fpout);
                         errno = 0;
-                        if(err_string) free(err_string);
-                        (void)!asprintf(&err_string, "Attempting to draw graph.\n");
-                        print_error(INFO);
+                        print_error(INFO, "Attempting to draw graph.\n", 0);
                         int status = system(args.graph_cmd);
                         if(status != 0){
-                            if(err_string) free(err_string);
-                            (void)!asprintf(&err_string, "Graphing failed.\n");
-                            print_error(ERROR);
+                            print_error(ERROR, "Graphing failed.\n", 0);
                             if(errno) perror("gnuplot");
                         }
                         break;
@@ -241,9 +235,7 @@ int main(int argc, char** argv){
                         showLatency = true;
                         break;
                     default:
-                        if(err_string) free(err_string);
-                        (void)!asprintf(&err_string, "Command could not be parsed.\n\e[1;31m%s\n\e[0m^----------------------------------------------------\n", bufin);
-                        print_error(ERROR);
+                        print_error(ERROR, "Command could not be parsed.\n\e[1;31m%s\n\e[0m^----------------------------------------------------\n", 1, bufin);
                 }
                 
             }
@@ -259,14 +251,10 @@ int main(int argc, char** argv){
                     data[1] |= (long)1 << 32;
                     fwrite(data, sizeof(long int), 2, fpout);
                     llost = seq;
-                    if(err_string) free(err_string);
-                    (void)!asprintf(&err_string, "%s\n", buf+2);
-                    print_error(WARN);
+                    print_error(WARN, "%s\n", 1, buf+2);
                     break;
                 case '-': 
-                    free(err_string);
-                    (void)!asprintf(&err_string, "ping exited.\033[0K\n\e[1;36m%s\e[0m\n", buf);
-                    print_error(INFO);
+                    print_error(INFO, "ping exited.\033[0K\n\e[1;36m%s\e[0m\n", 1, buf);
                     break;
                 case '0'...'9':
                     if(buf[3] == 'b'){
@@ -274,18 +262,14 @@ int main(int argc, char** argv){
                         result = sscanf(buf, "%*d bytes from %*s icmp_seq=%d ttl=%*d time=%f ms", &seq, &latency);
                         if(result == 2){
                             if(latency > args.maxPing){
-                                free(err_string);
-                                (void)!asprintf(&err_string, "latency exceeded %ld (%.0f)\n", args.maxPing, latency);
-                                print_error(WARN);
+                                print_error(WARN, "latency exceeded %ld (%.0f)\n", 2, args.maxPing, latency);
                             }
                             if(last+1 != seq){
-                                free(err_string);
-                                (void)!asprintf(&err_string, "PACKET LOSS (%d)\n", seq-last-1);
                                 data[0] = time(NULL);
                                 data[1] = (long)latency;
                                 data[1] |= (long)10 << 32;
                                 fwrite(data, sizeof(long int), 2, fpout);
-                                print_error(WARN);
+                                print_error(WARN, "PACKET LOSS (%d)\n", 1, seq-last-1);
                                 llost = seq;
                             }
                             last = seq;
@@ -298,18 +282,14 @@ int main(int argc, char** argv){
                             perror("scanf");
                         }else{
                             for(int i=2;buf[idx-i]=='\n';--i) buf[idx-i] = 0;
-                            if(err_string) free(err_string);
-                            (void)!asprintf(&err_string, "ping output could not be parsed.\n\e[1;31m%s\e[0m\n^----------------------------------------------------\n", buf);
-                            print_error(ERROR);
+                            print_error(ERROR, "ping output could not be parsed.\n\e[1;31m%s\e[0m\n^----------------------------------------------------\n", 1, buf);
                         }
                         break;
                     }
                     for(int i=2;buf[idx-i]=='\n';--i) buf[idx-i] = 0;
                 default: 
                     if(buf[0] == 0) continue;
-                    if(err_string) free(err_string);
-                    (void)!asprintf(&err_string, "ping output could not be parsed.\n\e[1;31m%s\e[0m\n^----------------------------------------------------\n", buf);
-                    print_error(ERROR);
+                    print_error(ERROR, "ping output could not be parsed.\n\e[1;31m%s\e[0m\n^----------------------------------------------------\n", 1, buf);
             }
             if(showLatency){
                 if(llost == seq){
@@ -324,13 +304,8 @@ int main(int argc, char** argv){
         if(fdout) close(fdout);
         fclose(fpout);
         wait(&status);
-        if(status){
-            if(err_string) free(err_string);
-            (void)!asprintf(&err_string, "ping exited with errors.\n");
-            print_error(ERROR);
-        }
+        if(status) print_error(ERROR, "ping exited with errors.\n", 0);
         // free before exit
-        if(err_string) free(err_string);
         if(args.graph_cmd) free(args.graph_cmd);
         for(int i=0; i<sizeof(prog_full_path)/sizeof(char *); ++i){
             if(prog_full_path[i]) 
