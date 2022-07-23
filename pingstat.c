@@ -16,7 +16,7 @@
 #define false 0
 #define true 1
 
-char* err_string;
+char* err_string = NULL;
 char* prog_name;
 
 void sig_ignore(int signum){
@@ -83,7 +83,7 @@ void dependencies(){
             int idx = i+1;
             for(char **nidx = names;*nidx;++nidx){
                 strcpy(buf+idx, *nidx);
-                if(access(buf, X_OK) == 0){
+                if(!prog_full_path[nidx-names] && access(buf, X_OK) == 0){
                     prog_full_path[nidx-names] = malloc(strlen(buf)+1);
                     strcpy(prog_full_path[nidx-names], buf);
                 }
@@ -95,6 +95,7 @@ void dependencies(){
     }
     for(int i=0; i<count; ++i){
         if(!prog_full_path[i]){
+            if(err_string) free(err_string);
             (void)!asprintf(&err_string, "command '%s' was not found on the path.\n", names[i]);
             print_error(ERROR);
         }
@@ -112,6 +113,7 @@ int main(int argc, char** argv){
     prog_name = argv[0];
     dependencies();
     if(!prog_full_path[PING]){
+        if(err_string) free(err_string);
         (void)!asprintf(&err_string, "ping must be installed, as ICMP echo requests require root permissions.\n");
         print_error(ERROR);
         exit(5);
@@ -148,7 +150,8 @@ int main(int argc, char** argv){
             args.outfile = argv[i];
         }
     }
-    if(!args.graph_cmd && prog_full_path[GNUPLOT]) (void)!asprintf(&args.graph_cmd, 
+    if(!args.graph_cmd && prog_full_path[GNUPLOT])
+    (void)!asprintf(&args.graph_cmd, 
         "%s -p -e \"set xdata time; set yrange [0<*:*<%ld]; plot '%s' binary format='%%long%%int%%*int'\
         using (\\$1):2 with %s title 'latency (ms)', '%s' binary format='%%long%%*int%%int' using (\\$1):2 lt rgb 'red'\
         title 'packet lost'\"", prog_full_path[GNUPLOT], args.maxPing, args.outfile,args.lines, args.outfile);
@@ -217,15 +220,18 @@ int main(int argc, char** argv){
                 }else switch(*bufin){
                     case 'g':
                         if(args.outfile && !strcmp(args.outfile, "-")){
+                            if(err_string) free(err_string);
                             (void)!asprintf(&err_string, "The graph command expects data to be written to a file. This will fail if '-g' was not used correctly\n");
                             print_error(WARN);
                         }
                         fflush(fpout);
                         errno = 0;
+                        if(err_string) free(err_string);
                         (void)!asprintf(&err_string, "Attempting to draw graph.\n");
                         print_error(INFO);
                         int status = system(args.graph_cmd);
                         if(status != 0){
+                            if(err_string) free(err_string);
                             (void)!asprintf(&err_string, "Graphing failed.\n");
                             print_error(ERROR);
                             if(errno) perror("gnuplot");
@@ -235,6 +241,7 @@ int main(int argc, char** argv){
                         showLatency = true;
                         break;
                     default:
+                        if(err_string) free(err_string);
                         (void)!asprintf(&err_string, "Command could not be parsed.\n\e[1;31m%s\n\e[0m^----------------------------------------------------\n", bufin);
                         print_error(ERROR);
                 }
@@ -252,10 +259,12 @@ int main(int argc, char** argv){
                     data[1] |= (long)1 << 32;
                     fwrite(data, sizeof(long int), 2, fpout);
                     llost = seq;
+                    if(err_string) free(err_string);
                     (void)!asprintf(&err_string, "%s\n", buf+2);
                     print_error(WARN);
                     break;
                 case '-': 
+                    free(err_string);
                     (void)!asprintf(&err_string, "ping exited.\033[0K\n\e[1;36m%s\e[0m\n", buf);
                     print_error(INFO);
                     break;
@@ -265,10 +274,12 @@ int main(int argc, char** argv){
                         result = sscanf(buf, "%*d bytes from %*s icmp_seq=%d ttl=%*d time=%f ms", &seq, &latency);
                         if(result == 2){
                             if(latency > args.maxPing){
+                                free(err_string);
                                 (void)!asprintf(&err_string, "latency exceeded %ld (%.0f)\n", args.maxPing, latency);
                                 print_error(WARN);
                             }
                             if(last+1 != seq){
+                                free(err_string);
                                 (void)!asprintf(&err_string, "PACKET LOSS (%d)\n", seq-last-1);
                                 data[0] = time(NULL);
                                 data[1] = (long)latency;
@@ -287,6 +298,7 @@ int main(int argc, char** argv){
                             perror("scanf");
                         }else{
                             for(int i=2;buf[idx-i]=='\n';--i) buf[idx-i] = 0;
+                            if(err_string) free(err_string);
                             (void)!asprintf(&err_string, "ping output could not be parsed.\n\e[1;31m%s\e[0m\n^----------------------------------------------------\n", buf);
                             print_error(ERROR);
                         }
@@ -295,6 +307,7 @@ int main(int argc, char** argv){
                     for(int i=2;buf[idx-i]=='\n';--i) buf[idx-i] = 0;
                 default: 
                     if(buf[0] == 0) continue;
+                    if(err_string) free(err_string);
                     (void)!asprintf(&err_string, "ping output could not be parsed.\n\e[1;31m%s\e[0m\n^----------------------------------------------------\n", buf);
                     print_error(ERROR);
             }
@@ -312,8 +325,16 @@ int main(int argc, char** argv){
         fclose(fpout);
         wait(&status);
         if(status){
+            if(err_string) free(err_string);
             (void)!asprintf(&err_string, "ping exited with errors.\n");
             print_error(ERROR);
+        }
+        // free before exit
+        if(err_string) free(err_string);
+        if(args.graph_cmd) free(args.graph_cmd);
+        for(int i=0; i<sizeof(prog_full_path)/sizeof(char *); ++i){
+            if(prog_full_path[i]) 
+                free(prog_full_path[i]);
         }
     }
     return(0);
