@@ -84,7 +84,7 @@ void dependencies(){
             for(char **nidx = names;*nidx;++nidx){
                 strcpy(buf+idx, *nidx);
                 if(access(buf, X_OK) == 0){
-                    prog_full_path[nidx-names] = malloc(strlen(buf));
+                    prog_full_path[nidx-names] = malloc(strlen(buf)+1);
                     strcpy(prog_full_path[nidx-names], buf);
                 }
             }
